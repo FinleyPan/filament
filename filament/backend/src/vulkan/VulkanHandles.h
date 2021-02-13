@@ -116,11 +116,10 @@ private:
 };
 
 struct VulkanSamplerGroup : public HwSamplerGroup {
-    VulkanSamplerGroup(VulkanContext& context, uint32_t count) : HwSamplerGroup(count) {}
+    VulkanSamplerGroup(uint32_t count) : HwSamplerGroup(count) {}
 };
 
 struct VulkanRenderPrimitive : public HwRenderPrimitive {
-    explicit VulkanRenderPrimitive(VulkanContext& context) {}
     void setPrimitiveType(backend::PrimitiveType pt);
     void setBuffers(VulkanVertexBuffer* vertexBuffer, VulkanIndexBuffer* indexBuffer);
     VulkanVertexBuffer* vertexBuffer = nullptr;

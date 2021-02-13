@@ -54,7 +54,6 @@ static VulkanLayoutTransition transitionHelper(VulkanLayoutTransition transition
 }
 
 void VulkanBlitter::blitColor(VkCommandBuffer cmdBuffer, BlitArgs args) {
-    lazyInit();
     const VulkanAttachment src = args.srcTarget->getColor(args.targetIndex);
     const VulkanAttachment dst = args.dstTarget->getColor(0);
     const VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -74,12 +73,11 @@ void VulkanBlitter::blitColor(VkCommandBuffer cmdBuffer, BlitArgs args) {
     }
 #endif
 
-    blitFast(aspect, args.filter, args.srcTarget, src, dst, args.srcRectPair, args.dstRectPair,
+    blitFast(aspect, args.filter, args.srcTarget->getExtent(), src, dst, args.srcRectPair, args.dstRectPair,
             cmdBuffer);
 }
 
 void VulkanBlitter::blitDepth(VkCommandBuffer cmdBuffer, BlitArgs args) {
-    lazyInit();
     const VulkanAttachment src = args.srcTarget->getDepth();
     const VulkanAttachment dst = args.dstTarget->getDepth();
     const VkImageAspectFlags aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -99,12 +97,18 @@ void VulkanBlitter::blitDepth(VkCommandBuffer cmdBuffer, BlitArgs args) {
     }
 #endif
 
-    blitFast(aspect, args.filter, args.srcTarget, src, dst, args.srcRectPair, args.dstRectPair,
-            cmdBuffer);
+    if (src.texture && src.texture->samples > 1 && dst.texture && dst.texture->samples == 1) {
+        blitSlowDepth(aspect, args.filter, args.srcTarget->getExtent(), src, dst, args.srcRectPair,
+            args.dstRectPair, cmdBuffer);
+        return;
+    }
+
+    blitFast(aspect, args.filter, args.srcTarget->getExtent(), src, dst, args.srcRectPair,
+            args.dstRectPair, cmdBuffer);
 }
 
 void VulkanBlitter::blitFast(VkImageAspectFlags aspect, VkFilter filter,
-    const VulkanRenderTarget* srcTarget, VulkanAttachment src, VulkanAttachment dst,
+    const VkExtent2D srcExtent, VulkanAttachment src, VulkanAttachment dst,
     const VkOffset3D srcRect[2], const VkOffset3D dstRect[2], VkCommandBuffer cmdbuffer) {
     const VkImageBlit blitRegions[1] = {{
         .srcSubresource = { aspect, src.level, src.layer, 1 },
@@ -112,8 +116,6 @@ void VulkanBlitter::blitFast(VkImageAspectFlags aspect, VkFilter filter,
         .dstSubresource = { aspect, dst.level, dst.layer, 1 },
         .dstOffsets = { dstRect[0], dstRect[1] }
     }};
-
-    const VkExtent2D srcExtent = srcTarget->getExtent();
 
     const VkImageResolve resolveRegions[1] = {{
         .srcSubresource = { aspect, src.level, src.layer, 1 },
@@ -198,15 +200,27 @@ void VulkanBlitter::blitFast(VkImageAspectFlags aspect, VkFilter filter,
 
 void VulkanBlitter::shutdown() noexcept {
     if (mContext.device) {
-        vkDestroyShaderModule(mContext.device, mVertex, VKALLOC);
-        vkDestroyShaderModule(mContext.device, mFragment, VKALLOC);
+        vkDestroyShaderModule(mContext.device, mVertexShader, VKALLOC);
+        mVertexShader = nullptr;
+
+        vkDestroyShaderModule(mContext.device, mFragmentShader, VKALLOC);
+        mFragmentShader = nullptr;
+
+        delete mTriangleBuffer;
+        mTriangleBuffer = nullptr;
+
+        delete mTriangleVertexBuffer;
+        mTriangleVertexBuffer = nullptr;
+
+        delete mRenderPrimitive;
+        mRenderPrimitive = nullptr;
     }
 }
 
 // If we created these shader modules in the constructor, the device might not be ready yet.
 // It is easier to do lazy initialization, which can also improve load time.
 void VulkanBlitter::lazyInit() noexcept {
-    if (mVertex) {
+    if (mVertexShader) {
         return;
     }
     assert_invariant(mContext.device);
@@ -215,15 +229,46 @@ void VulkanBlitter::lazyInit() noexcept {
     moduleInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     VkResult result;
 
-    moduleInfo.codeSize = VKSHADERS_BLITCOLORVS_SIZE;
-    moduleInfo.pCode = (uint32_t*) VKSHADERS_BLITCOLORVS_DATA;
-    result = vkCreateShaderModule(mContext.device, &moduleInfo, VKALLOC, &mVertex);
+    moduleInfo.codeSize = VKSHADERS_BLITDEPTHVS_SIZE;
+    moduleInfo.pCode = (uint32_t*) VKSHADERS_BLITDEPTHVS_DATA;
+    result = vkCreateShaderModule(mContext.device, &moduleInfo, VKALLOC, &mVertexShader);
     ASSERT_POSTCONDITION(result == VK_SUCCESS, "Unable to create vertex shader for blit.");
 
-    moduleInfo.codeSize = VKSHADERS_BLITCOLORFS_SIZE;
-    moduleInfo.pCode = (uint32_t*) VKSHADERS_BLITCOLORFS_DATA;
-    result = vkCreateShaderModule(mContext.device, &moduleInfo, VKALLOC, &mFragment);
+    moduleInfo.codeSize = VKSHADERS_BLITDEPTHFS_SIZE;
+    moduleInfo.pCode = (uint32_t*) VKSHADERS_BLITDEPTHFS_DATA;
+    result = vkCreateShaderModule(mContext.device, &moduleInfo, VKALLOC, &mFragmentShader);
     ASSERT_POSTCONDITION(result == VK_SUCCESS, "Unable to create fragment shader for blit.");
+
+    static const float kTriangleVertices[] = {
+        -1.0f, -1.0f,
+        +1.0f, -1.0f,
+        -1.0f, +1.0f,
+        +1.0f, +1.0f,
+    };
+
+    mTriangleBuffer = new VulkanBuffer(mContext, mStagePool, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            sizeof(kTriangleVertices));
+
+    mTriangleBuffer->loadFromCpu(kTriangleVertices, 0, sizeof(kTriangleVertices));
+    mDisposer.acquire(mTriangleBuffer);
+
+    AttributeArray attributes = {};
+    attributes[0].buffer = 0;
+    attributes[0].type = ElementType::FLOAT2;
+    attributes[0].stride = sizeof(float) * 2;
+    mTriangleVertexBuffer = new VulkanVertexBuffer(mContext, mStagePool, 1, 1, 4, attributes);
+
+    mRenderPrimitive = new VulkanRenderPrimitive();
+    mRenderPrimitive->setPrimitiveType(PrimitiveType::TRIANGLES);
+    mRenderPrimitive->vertexBuffer = mTriangleVertexBuffer;
+}
+
+void VulkanBlitter::blitSlowDepth(VkImageAspectFlags aspect, VkFilter filter,
+        const VkExtent2D srcExtent, VulkanAttachment src, VulkanAttachment dst,
+        const VkOffset3D srcRect[2], const VkOffset3D dstRect[2], VkCommandBuffer cmdbuffer) {
+    lazyInit();
+
+    PANIC_POSTCONDITION("Resolve with depth is not yet supported.");
 }
 
 } // namespace filament
