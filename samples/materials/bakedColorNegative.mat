@@ -1,0 +1,21 @@
+material {
+    name : BakedColorNegative,
+    parameters : [
+        {
+            type : sampler2d,
+            name : albedo
+        }
+    ],
+    requires : [
+        uv0
+    ],
+    shadingModel : unlit,
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);  
+        vec4 color = texture(materialParams_albedo, getUV0());      
+        material.baseColor = vec4(1.0 - color.r, 1.0 - color.g, 1.0 - color.b, color.a);
+    }
+}

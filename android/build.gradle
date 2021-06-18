@@ -61,7 +61,7 @@ buildscript {
 
     // Our minSdkVersion is 19.
     ext.versions = [
-        'minSdk': 19,
+        'minSdk': 21,
         'targetSdk': 30,
         'compileSdk': 30,
         'kotlin': '1.4.10',

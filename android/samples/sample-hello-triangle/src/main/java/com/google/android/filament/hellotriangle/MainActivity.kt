@@ -20,6 +20,7 @@ import android.animation.ValueAnimator
 import android.app.Activity
 import android.opengl.Matrix
 import android.os.Bundle
+import android.util.Log
 import android.view.Choreographer
 import android.view.Surface
 import android.view.SurfaceView
@@ -45,7 +46,9 @@ class MainActivity : Activity() {
             Filament.init()
         }
     }
-
+    private val TAG = MainActivity::class.qualifiedName
+    private var texWidth : Int = 0
+    private var texHeight : Int = 0
     // The View we want to render into
     private lateinit var surfaceView: SurfaceView
     // UiHelper is provided by Filament to manage SurfaceView and SurfaceTexture
@@ -62,18 +65,32 @@ class MainActivity : Activity() {
     // A renderer instance is tied to a single surface (SurfaceView, TextureView, etc.)
     private lateinit var renderer: Renderer
     // A scene holds all the renderable, lights, etc. to be drawn
-    private lateinit var scene: Scene
-    // A view defines a viewport, a scene and a camera for rendering
-    private lateinit var view: View
+    private lateinit var renderedScene: Scene
+    private lateinit var postProcessScene: Scene
+    // A view defines a viewport, a renderedScene and a camera for rendering
+    private lateinit var renderedView: View
+    private lateinit var postProcessView: View
     // Should be pretty obvious :)
     private lateinit var camera: Camera
+    //target which will be rendered into
+    private lateinit var renderedTarget: RenderTarget
+    private lateinit var renderedColorTex: Texture
+    private lateinit var renderedDepthTex: Texture
+    //target for image post-processing
+//    private lateinit var postProcessTarget: RenderTarget
+//    private lateinit var postProcessColorTex: Texture
 
-    private lateinit var material: Material
-    private lateinit var vertexBuffer: VertexBuffer
-    private lateinit var indexBuffer: IndexBuffer
+    private lateinit var renderedMaterial: Material
+    private lateinit var renderedVertexBuffer: VertexBuffer
+    private lateinit var renderedIndexBuffer: IndexBuffer
+
+    private lateinit var postProcessMaterial: Material
+    private lateinit var postProcessVertexBuffer: VertexBuffer
+    private lateinit var postProcessIndexBuffer: IndexBuffer
 
     // Filament entity representing a renderable object
-    @Entity private var renderable = 0
+    @Entity private var renderedRenderable = 0
+    @Entity private var postProcessRenderable = 0
 
     // A swap chain is Filament's representation of a surface
     private var swapChain: SwapChain? = null
@@ -111,22 +128,27 @@ class MainActivity : Activity() {
     private fun setupFilament() {
         engine = Engine.create()
         renderer = engine.createRenderer()
-        scene = engine.createScene()
-        view = engine.createView()
+        renderedScene = engine.createScene()
+        renderedView = engine.createView()
+        postProcessScene = engine.createScene()
+        postProcessView = engine.createView()
         camera = engine.createCamera()
     }
 
     private fun setupView() {
-        scene.skybox = Skybox.Builder().color(0.035f, 0.035f, 0.035f, 1.0f).build(engine)
+        renderedScene.skybox = Skybox.Builder().color(0.035f, 0.035f, 0.035f, 1.0f).build(engine)
 
         // NOTE: Try to disable post-processing (tone-mapping, etc.) to see the difference
         // view.isPostProcessingEnabled = false
 
-        // Tell the view which camera we want to use
-        view.camera = camera
+        // Tell the renderedView which camera we want to use
+        renderedView.camera = camera
 
         // Tell the view which scene we want to render
-        view.scene = scene
+        renderedView.scene = renderedScene
+
+        postProcessView.camera = camera
+        postProcessView.scene  = postProcessScene
     }
 
     private fun setupScene() {
@@ -134,28 +156,45 @@ class MainActivity : Activity() {
         createMesh()
 
         // To create a renderable we first create a generic entity
-        renderable = EntityManager.get().create()
+        renderedRenderable = EntityManager.get().create()
 
         // We then create a renderable component on that entity
         // A renderable is made of several primitives; in this case we declare only 1
         RenderableManager.Builder(1)
                 // Overall bounding box of the renderable
-                .boundingBox(Box(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.01f))
+                .boundingBox(Box(-1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f))
                 // Sets the mesh data of the first primitive
-                .geometry(0, PrimitiveType.TRIANGLES, vertexBuffer, indexBuffer, 0, 3)
+                .geometry(0, PrimitiveType.TRIANGLES, renderedVertexBuffer, renderedIndexBuffer, 0, 3)
                 // Sets the material of the first primitive
-                .material(0, material.defaultInstance)
-                .build(engine, renderable)
+                .material(0, renderedMaterial.defaultInstance)
+                .build(engine, renderedRenderable)
 
         // Add the entity to the scene to render it
-        scene.addEntity(renderable)
+        renderedScene.addEntity(renderedRenderable)
 
-        startAnimation()
+        postProcessRenderable = EntityManager.get().create()
+
+        RenderableManager.Builder(1)
+                // Overall bounding box of the renderable
+                .boundingBox(Box(-1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f))
+                // Sets the mesh data of the first primitive
+                .geometry(0, PrimitiveType.TRIANGLES, postProcessVertexBuffer, postProcessIndexBuffer, 0, 6)
+                // Sets the material of the first primitive
+                .material(0, postProcessMaterial.defaultInstance)
+                .build(engine, postProcessRenderable)
+
+        postProcessScene.addEntity(postProcessRenderable)
+
+        //startAnimation()
     }
 
     private fun loadMaterial() {
         readUncompressedAsset("materials/baked_color.filamat").let {
-            material = Material.Builder().payload(it, it.remaining()).build(engine)
+            renderedMaterial = Material.Builder().payload(it, it.remaining()).build(engine)
+        }
+
+        readUncompressedAsset("materials/baked_color_negative.filamat").let {
+            postProcessMaterial = Material.Builder().payload(it, it.remaining()).build(engine)
         }
     }
 
@@ -192,7 +231,7 @@ class MainActivity : Activity() {
                 .flip()
 
         // Declare the layout of our mesh
-        vertexBuffer = VertexBuffer.Builder()
+        renderedVertexBuffer = VertexBuffer.Builder()
                 .bufferCount(1)
                 .vertexCount(vertexCount)
                 // Because we interleave position and color data we must specify offset and stride
@@ -207,7 +246,7 @@ class MainActivity : Activity() {
 
         // Feed the vertex data to the mesh
         // We only set 1 buffer because the data is interleaved
-        vertexBuffer.setBufferAt(engine, 0, vertexData)
+        renderedVertexBuffer.setBufferAt(engine, 0, vertexData)
 
         // Create the indices
         val indexData = ByteBuffer.allocate(vertexCount * shortSize)
@@ -217,11 +256,62 @@ class MainActivity : Activity() {
                 .putShort(2)
                 .flip()
 
-        indexBuffer = IndexBuffer.Builder()
+        renderedIndexBuffer = IndexBuffer.Builder()
                 .indexCount(3)
                 .bufferType(IndexBuffer.Builder.IndexType.USHORT)
                 .build(engine)
-        indexBuffer.setBuffer(engine, indexData)
+        renderedIndexBuffer.setBuffer(engine, indexData)
+
+
+        data class PostProcessVertex(val x: Float, val y: Float, val u: Float, val v: Float)
+        fun ByteBuffer.put(v: PostProcessVertex): ByteBuffer {
+            putFloat(v.x)
+            putFloat(v.y)
+            putFloat(v.u)
+            putFloat(v.v)
+            return this
+        }
+        val postProcessVertexSize = 4 * floatSize;
+        val postProcessVertexCount = 4;
+        val postProcessVertexData = ByteBuffer.allocate(postProcessVertexCount * postProcessVertexSize)
+                // It is important to respect the native byte order
+                .order(ByteOrder.nativeOrder())
+                .put(PostProcessVertex(-1.0f, -1.0f, 0.0f, 0.0f))
+                .put(PostProcessVertex(1.0f, -1.0f, 1.0f, 0.0f))
+                .put(PostProcessVertex(-1.0f, 1.0f, 0.0f, 1.0f))
+                .put(PostProcessVertex(1.0f, 1.0f, 1.0f, 1.0f))
+                // Make sure the cursor is pointing in the right place in the byte buffer
+                .flip()
+
+        postProcessVertexBuffer = VertexBuffer.Builder()
+                .bufferCount(1)
+                .vertexCount(postProcessVertexCount)
+                // Because we interleave position and color data we must specify offset and stride
+                // We could use de-interleaved data by declaring two buffers and giving each
+                // attribute a different buffer index
+                .attribute(VertexAttribute.POSITION, 0, AttributeType.FLOAT2, 0,             postProcessVertexSize)
+                .attribute(VertexAttribute.UV0,    0, AttributeType.FLOAT2, 2 * floatSize, postProcessVertexSize)
+                .build(engine)
+
+        postProcessVertexBuffer.setBufferAt(engine,0, postProcessVertexData)
+
+        val postProcessIndexData = ByteBuffer.allocate(6 * shortSize)
+                .order(ByteOrder.nativeOrder())
+                .putShort(0)
+                .putShort(1)
+                .putShort(2)
+                .putShort(3)
+                .putShort(2)
+                .putShort(1)
+                .flip()
+
+        postProcessIndexBuffer = IndexBuffer.Builder()
+                .indexCount(6)
+                .bufferType(IndexBuffer.Builder.IndexType.USHORT)
+                .build(engine)
+        postProcessIndexBuffer.setBuffer(engine, postProcessIndexData)
+
+
     }
 
     private fun startAnimation() {
@@ -235,7 +325,7 @@ class MainActivity : Activity() {
             override fun onAnimationUpdate(a: ValueAnimator) {
                 Matrix.setRotateM(transformMatrix, 0, -(a.animatedValue as Float), 0.0f, 0.0f, 1.0f)
                 val tcm = engine.transformManager
-                tcm.setTransform(tcm.getInstance(renderable), transformMatrix)
+                tcm.setTransform(tcm.getInstance(renderedRenderable), transformMatrix)
             }
         })
         animator.start()
@@ -264,19 +354,19 @@ class MainActivity : Activity() {
         uiHelper.detach()
 
         // Cleanup all resources
-        engine.destroyEntity(renderable)
+        engine.destroyEntity(renderedRenderable)
         engine.destroyRenderer(renderer)
-        engine.destroyVertexBuffer(vertexBuffer)
-        engine.destroyIndexBuffer(indexBuffer)
-        engine.destroyMaterial(material)
-        engine.destroyView(view)
-        engine.destroyScene(scene)
+        engine.destroyVertexBuffer(renderedVertexBuffer)
+        engine.destroyIndexBuffer(renderedIndexBuffer)
+        engine.destroyMaterial(renderedMaterial)
+        engine.destroyView(renderedView)
+        engine.destroyScene(renderedScene)
         engine.destroyCamera(camera)
 
         // Engine.destroyEntity() destroys Filament related resources only
         // (components), not the entity itself
         val entityManager = EntityManager.get()
-        entityManager.destroy(renderable)
+        entityManager.destroy(renderedRenderable)
 
         // Destroying the engine will free up any resource you may have forgotten
         // to destroy, but it's recommended to do the cleanup properly
@@ -293,7 +383,8 @@ class MainActivity : Activity() {
                 // If beginFrame() returns false you should skip the frame
                 // This means you are sending frames too quickly to the GPU
                 if (renderer.beginFrame(swapChain!!, frameTimeNanos)) {
-                    renderer.render(view)
+                    renderer.render(renderedView)
+                    renderer.render(postProcessView)
                     renderer.endFrame()
                 }
             }
@@ -305,6 +396,8 @@ class MainActivity : Activity() {
             swapChain?.let { engine.destroySwapChain(it) }
             swapChain = engine.createSwapChain(surface, uiHelper.swapChainFlags)
             displayHelper.attach(renderer, surfaceView.display);
+
+
         }
 
         override fun onDetachedFromSurface() {
@@ -321,11 +414,54 @@ class MainActivity : Activity() {
 
         override fun onResized(width: Int, height: Int) {
             val zoom = 1.5
+            texWidth = width
+            texHeight = height
             val aspect = width.toDouble() / height.toDouble()
             camera.setProjection(Camera.Projection.ORTHO,
                     -aspect * zoom, aspect * zoom, -zoom, zoom, 0.0, 10.0)
 
-            view.viewport = Viewport(0, 0, width, height)
+            renderedView.viewport = Viewport(0, 0, width, height)
+
+            renderedColorTex = Texture.Builder()
+                    .width(width)
+                    .height(height)
+                    .sampler(Texture.Sampler.SAMPLER_2D)
+                    .format(Texture.InternalFormat.RGBA8)
+                    .usage(Texture.Usage.COLOR_ATTACHMENT)
+                    .build(engine)
+
+            renderedDepthTex = Texture.Builder()
+                    .width(width)
+                    .height(height)
+                    .sampler(Texture.Sampler.SAMPLER_2D)
+                    .format(Texture.InternalFormat.DEPTH24_STENCIL8)
+                    .usage(Texture.Usage.DEPTH_ATTACHMENT)
+                    .build(engine)
+
+            renderedTarget = RenderTarget.Builder()
+                    .texture(RenderTarget.AttachmentPoint.COLOR, renderedColorTex)
+                    .texture(RenderTarget.AttachmentPoint.DEPTH, renderedDepthTex)
+                    .build(engine)
+
+//            postProcessColorTex = Texture.Builder()
+//                    .width(width)
+//                    .height(height)
+//                    .sampler(Texture.Sampler.SAMPLER_2D)
+//                    .format(Texture.InternalFormat.RGBA8)
+//                    .usage(Texture.Usage.COLOR_ATTACHMENT)
+//                    .build(engine)
+//
+//            postProcessTarget = RenderTarget.Builder()
+//                    .texture(RenderTarget.AttachmentPoint.COLOR, postProcessColorTex)
+//                    .build(engine)
+            val sampler = TextureSampler(TextureSampler.MinFilter.LINEAR, TextureSampler.MagFilter.LINEAR, TextureSampler.WrapMode.REPEAT)
+            postProcessMaterial.defaultInstance.setParameter("albedo", renderedColorTex, sampler)
+            postProcessView.viewport = Viewport(0, 0, width, height)
+
+            //do off-screen rendering first
+            renderedView.renderTarget = renderedTarget
+            //then do on-screen rendering
+            postProcessView.renderTarget = null
         }
     }
 
