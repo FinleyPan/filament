@@ -245,6 +245,7 @@ if (NOT ANDROID)
     add_demo(texturedquad)
     add_demo(vbotest)
     add_demo(viewtest)
+    add_demo(multiple_fbos)
 
     # Sample app specific
     target_link_libraries(frame_generator PRIVATE imageio)

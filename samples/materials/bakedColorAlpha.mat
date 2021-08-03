@@ -1,0 +1,17 @@
+material {
+    name : BakedColorAlpha,
+    requires : [
+        color
+    ],
+    shadingModel : unlit,
+    blending: transparent,
+    culling : none
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor = getColor();
+        material.baseColor.a = 0.2;
+    }
+}
