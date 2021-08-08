@@ -12,6 +12,6 @@ fragment {
     void material(inout MaterialInputs material) {
         prepareMaterial(material);
         material.baseColor = getColor();
-        material.baseColor.a = 0.2;
+        material.baseColor.a = 1.0;
     }
 }

@@ -4,6 +4,7 @@
 #include <filament/Material.h>
 #include <filament/MaterialInstance.h>
 #include <filament/RenderableManager.h>
+#include <filament/TransformManager.h>
 #include <filament/Renderer.h>
 #include <filament/RenderTarget.h>
 #include <filament/Scene.h>
@@ -14,7 +15,6 @@
 #include <filament/View.h>
 
 #include <utils/EntityManager.h>
-#include <utils/Entity.h>
 
 #include <utils/Path.h>
 
@@ -41,22 +41,67 @@ using MinFilter = TextureSampler::MinFilter;
 using MagFilter = TextureSampler::MagFilter;
 
 struct Vertex {
-    filament::math::float2 position;
+    filament::math::float3 position;
     filament::math::float2 uv;
     filament::math::float4 color;
 };
 
 static const Vertex QUAD_VERTICES[4] = {
-    {{-1, -1}, {0, 0}, {0, 0, 0, 0}},
-    {{ 1, -1}, {1, 0}, {0, 0, 0, 0}},
-    {{-1,  1}, {0, 1}, {0, 0, 0, 0}},
-    {{ 1,  1}, {1, 1}, {0, 0, 0, 0}},
+    {{ -1, -1, 0}, {0, 0}, {0, 0, 0, 0}},
+    {{ 1, -1, 0}, {1, 0}, {0, 0, 0, 0}},
+    {{-1,  1, 0}, {0, 1}, {0, 0, 0, 0}},
+    {{ 1,  1, 0}, {1, 1}, {0, 0, 0, 0}},
 };
 
 static const Vertex TRIANGLE_VERTICES[3] = {
-    {{-0.5, -0.5}, {0, 0}, {1, 0, 0, 1}},
-    {{ 0.5, -0.5}, {0, 0}, {0, 1, 0, 1}},
-    {{   0,  0.5}, {0, 0}, {0, 0, 1, 1}},
+    {{1.0, 0.0, 0}, {0, 0}, {1, 0, 0, 1}}, //right:  red
+    {{0.0, 1.0, 0}, {0, 0}, {0, 1, 0, 1}}, //top  :  green
+    {{0.0,-1.0, 0}, {0, 0}, {0, 0, 1, 1}}, //bottom:  blue
+};
+
+static const Vertex CUBE_VERTICES[] = {
+    //back: Red
+    {{-0.5, -0.5, -0.5}, {0, 0}, {1, 0, 0, 1}},
+    {{0.5f, -0.5f, -0.5f}, {1, 0}, {1, 0, 0, 1}},
+    {{0.5f,  0.5f, -0.5f}, {1, 1}, {1, 0, 0, 1}},
+    {{0.5f,  0.5f, -0.5f}, {1, 1}, {1, 0, 0, 1}},
+    {{-0.5f, 0.5f, -0.5f}, {0, 1}, {1, 0, 0, 1}},
+    {{-0.5f, -0.5f, -0.5f}, {0, 0}, {1, 0, 0, 1}},
+    //front: green
+    {{-0.5, -0.5, 0.5}, {0, 0}, {0, 1, 0, 1}},
+    {{0.5f, -0.5f, 0.5f}, {1, 0}, {0, 1, 0, 1}},
+    {{0.5f,  0.5f, 0.5f}, {1, 1}, {0, 1, 0, 1}},
+    {{0.5f,  0.5f, 0.5f}, {1, 1}, {0, 1, 0, 1}},
+    {{-0.5f, 0.5f, 0.5f}, {0, 1}, {0, 1, 0, 1}},
+    {{-0.5f, -0.5f,0.5f}, {0, 0}, {0, 1, 0, 1}},
+    //left: blue
+    {{-0.5, 0.5, 0.5}, {1, 0}, {0, 0, 1, 1}},
+    {{-0.5f, 0.5f, -0.5f}, {1, 1}, {0, 0, 1, 1}},
+    {{-0.5f, -0.5f, -0.5f}, {0, 1}, {0, 0, 1, 1}},
+    {{-0.5f, -0.5f, -0.5f}, {0, 1}, {0, 0, 1, 1}},
+    {{-0.5f, -0.5f, 0.5f}, {0, 0}, {0, 0, 1, 1}},
+    {{-0.5f, 0.5f,0.5f}, {1, 0}, {0, 0, 1, 1}},
+    //right: yellow
+    {{0.5, 0.5, 0.5}, {1, 0}, {1, 1, 0, 1}},
+    {{0.5f, 0.5f, -0.5f}, {1, 1}, {1, 1, 0, 1}},
+    {{0.5f, -0.5f, -0.5f}, {0, 1}, {1, 1, 0, 1}},
+    {{0.5f, -0.5f, -0.5f}, {0, 1}, {1, 1, 0, 1}},
+    {{0.5f, -0.5f, 0.5f}, {0, 0}, {1, 1, 0, 1}},
+    {{0.5f, 0.5f,0.5f}, {1, 0}, {1, 1, 0, 1}},
+    //bottom: magenta
+    {{-0.5, -0.5, -0.5}, {0, 1}, {1, 0, 1, 1}},
+    {{0.5f, -0.5f, -0.5f}, {1, 1}, {1, 0, 1, 1}},
+    {{0.5f, -0.5f, 0.5f}, {1, 0}, {1, 0, 1, 1}},
+    {{0.5f, -0.5f, 0.5f}, {1, 0}, {1, 0, 1, 1}},
+    {{-0.5f, -0.5f, 0.5f}, {0, 0}, {1, 0, 1, 1}},
+    {{-0.5f, -0.5f,-0.5f}, {0, 1}, {1, 0, 1, 1}},
+    //top: cyan
+    {{-0.5, 0.5, -0.5}, {0, 1}, {0, 1, 1, 1}},
+    {{0.5f, 0.5f, -0.5f}, {1, 1}, {0, 1, 1, 1}},
+    {{0.5f, 0.5f, 0.5f}, {1, 0}, {0, 1, 1, 1}},
+    {{0.5f, 0.5f, 0.5f}, {1, 0}, {0, 1, 1, 1}},
+    {{-0.5f, 0.5f, 0.5f}, {0, 0}, {0, 1, 1, 1}},
+    {{-0.5f, 0.5f,-0.5f}, {0, 1}, {0, 1, 1, 1}},
 };
 
 static constexpr uint16_t QUAD_INDICES[6] = {
@@ -65,7 +110,11 @@ static constexpr uint16_t QUAD_INDICES[6] = {
 };
 
 static constexpr uint16_t TRIANGLE_INDICES[3] = {
-    0, 1, 2   
+    0, 1, 2
+};
+
+static constexpr uint16_t CUBE_INDICES[] = {
+    0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35
 };
 
 constexpr uint8_t BAKED_TEXTURE_MAT[] = {
@@ -81,6 +130,8 @@ constexpr int kWindowPosX = SDL_WINDOWPOS_CENTERED;
 constexpr int kWindowPosY = SDL_WINDOWPOS_CENTERED;
 constexpr uint32_t kWindowFlags = SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE;
 
+using namespace filament::math;
+
 static bool ShouldWindowExit(SDL_Event* event){
     SDL_PollEvent(event);
     if(event->type == SDL_KEYDOWN){
@@ -95,7 +146,7 @@ static void FreeCallback(void* buffer, size_t size, void* user){
 }
 
 class TextureWrapper{
-public:    
+public:
     TextureWrapper(filament::Engine *engine):
         engine_(engine) {}
 
@@ -136,7 +187,7 @@ private:
 struct FilamentEntity{
     VertexBuffer *vb = nullptr;
     IndexBuffer *ib = nullptr;
-    Material *mat = nullptr;    
+    Material *mat = nullptr;
     MaterialInstance *mat_inst = nullptr;
     Entity entity;
     Engine *engine = nullptr;
@@ -154,12 +205,13 @@ struct FilamentEntity{
     }
     
     operator const Entity&() const{return entity;}
+    operator Entity&() {return entity;}
     
     void InitVertexBuffer(uint32_t nvertices, uint8_t byte_stride, uint32_t pos_offset, uint32_t uv_offset, uint32_t color_offset, const void *data){
         vb = VertexBuffer::Builder()
             .vertexCount(nvertices)
             .bufferCount(1)
-            .attribute(VertexAttribute::POSITION, 0, VertexBuffer::AttributeType::FLOAT2, pos_offset, byte_stride)
+            .attribute(VertexAttribute::POSITION, 0, VertexBuffer::AttributeType::FLOAT3, pos_offset, byte_stride)
             .attribute(VertexAttribute::UV0, 0, VertexBuffer::AttributeType::FLOAT2, uv_offset, byte_stride)
             .attribute(VertexAttribute::COLOR, 0, VertexBuffer::AttributeType::FLOAT4, color_offset, byte_stride)
             .build(*engine);
@@ -197,6 +249,7 @@ struct FilamentEntity{
         mat_inst = mat->createInstance();
 
         entity = EntityManager::get().create();
+        //mat_inst->setDoubleSided(true);
         RenderableManager::Builder(1)
             .boundingBox({{ -1, -1, -1 }, { 1, 1, 1 }})
             .material(0, mat_inst)
@@ -211,7 +264,7 @@ struct FilamentEntity{
 
 class FilaRenderTarget {
 public:
-    FilaRenderTarget(){}    
+    FilaRenderTarget(){}
     ~FilaRenderTarget(){}
 
     operator filament::RenderTarget*() const{
@@ -240,8 +293,8 @@ public:
                 .width(width)
                 .height(height)
                 .sampler(filament::Texture::Sampler::SAMPLER_2D)
-                .format(filament::Texture::InternalFormat::DEPTH24_STENCIL8)
-                .usage(filament::Texture::Usage::DEPTH_ATTACHMENT)
+                .format(filament::Texture::InternalFormat::DEPTH32F)
+                .usage(filament::Texture::Usage::DEPTH_ATTACHMENT | filament::Texture::Usage::SAMPLEABLE)
                 .build(*engine);
 
             target_ = filament::RenderTarget::Builder()
@@ -265,10 +318,10 @@ public:
             engine->destroy(depth_);
             depth_ = nullptr;
         }
-    } 
+    }
 
     filament::Texture *color() {return color_;}
-    filament::Texture *depth() {return depth_;}   
+    filament::Texture *depth() {return depth_;}
 
 private:
     filament::RenderTarget *target_ = nullptr;
@@ -292,7 +345,7 @@ public:
             scene_->setSkybox(skybox_);
             view_->setCamera(camera_);
             view_->setScene(scene_);
-            view_->setPostProcessingEnabled(enable_postprocessing);            
+            view_->setPostProcessingEnabled(enable_postprocessing);
             name_ = name;
         }
     }
@@ -304,7 +357,7 @@ public:
             //    .color({1.0, 0.0, 1.0, 0.5})
             //    .build(*engine_);
             cam_ent_ = utils::EntityManager::get().create();
-            scene_  = engine_->createScene();            
+            scene_  = engine_->createScene();
             view_   = engine_->createView();
             camera_ = engine->createCamera(cam_ent_);
             scene_->setSkybox(skybox_);
@@ -317,13 +370,29 @@ public:
         }
     }
 
+    void animate(double now, const char* name){
+        auto iter = entities_.find(name_ + "_" + name);
+        if(iter == entities_.end()) return;
+        auto &tcm = engine_->getTransformManager();
+        tcm.setTransform(tcm.getInstance(*iter->second),
+            mat4f::rotation(now, float3{1, 1, 0}));
+    }
+
     void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h){
         view_->setViewport({x, y, w, h});
+    }
+    
+    void SetCameraLootAt(const float3& pos, const float3& at, const float3& up){
+        camera_->lookAt(pos, at, up);
+    }
+
+    void SetCameraProjection(double fov, double aspect, double near, double far){
+        camera_->setProjection(fov, aspect, near, far);
     }
 
     ~Renderable(){ Destroy(); }
 
-    operator filament::View*() const { return view_; }   
+    operator filament::View*() const { return view_; }
 
     void AddEntity(const char* name, FilamentEntity *entity){
         scene_->addEntity(*entity);
@@ -340,14 +409,14 @@ public:
 
         engine_->destroy(skybox_);
         engine_->destroyCameraComponent(cam_ent_);
-        utils::EntityManager::get().destroy(cam_ent_);
+               utils::EntityManager::get().destroy(cam_ent_);
         engine_->destroy(view_);
         engine_->destroy(scene_);
         engine_ = nullptr;
     }
 
 private:
-    filament::Scene   *scene_ = nullptr;    
+    filament::Scene   *scene_ = nullptr;
     filament::View     *view_ = nullptr;
     filament::Camera *camera_ = nullptr;
     filament::Engine *engine_ = nullptr;
@@ -377,19 +446,20 @@ public:
         swapchain_ = engine_->createSwapChain(native_window);
         renderer_ = engine_->createRenderer();
         
-        renderer_->setClearOptions({{0.0, 0.0, 0.0, 0.0}, true});
-    }   
+        renderer_->setClearOptions({{0.0, 0.0, 0.0, 0.0}, true, false});
+    }
     
     void Destroy(){
         engine_->destroy(swapchain_);
         engine_->destroy(renderer_);
         engine_->destroy(&engine_);
         engine_ = nullptr;
-    }       
+    }
 
-    void DoRender(const std::vector<const ::Renderable*> &renderables){        
+    void DoRender(const std::vector<const ::Renderable*> &renderables){
+        double now = (double)SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency();
         if(renderer_->beginFrame(swapchain_)){
-            for(const auto& renderable : renderables){                
+            for(const auto& renderable : renderables){
                 renderer_->render(*renderable);
                 //int w = renderable->color()->getWidth();
                 //int h = renderable->color()->getHeight();
@@ -412,72 +482,57 @@ public:
     
     Engine *engine_ref() const {return engine_;}
     
-private:    
+private:
     Engine *engine_ = nullptr;
     SwapChain *swapchain_ = nullptr ;
-    Renderer *renderer_= nullptr;        
+    Renderer *renderer_= nullptr;
 };
 
-int main(){
-    if(SDL_Init(SDL_INIT_EVENTS) !=0 ){
-        std::cout<< "SDL init failed! exit..." <<std::endl;
-        return -1;
-    }
-    
-    bool open_post_process = false;
-    
+uint8_t *load_image(const char* rel_path, int& width, int& height){
     //load texture data
-    Path path = FilamentApp::getRootAssetsPath() + "textures/Moss_01/Moss_01_Color.png";
+    Path path = FilamentApp::getRootAssetsPath() + rel_path;
     if (!path.exists()) {
         std::cerr << "The texture " << path << " does not exist" << std::endl;
         exit(1);
     }
-    int width, height, nchannels;
+    int nchannels;
     uint8_t *data = stbi_load(path.c_str(), &width, &height, &nchannels, 4);
     if (data == nullptr) {
         std::cerr << "The texture " << path << " could not be loaded" << std::endl;
         exit(1);
     }
     std::cout << "Loaded texture: " << width << "x" << height << ", channels: "<<nchannels<<std::endl;
+    return data;
+}
+
+int main(){
+    if(SDL_Init(SDL_INIT_EVENTS) !=0 ){
+        std::cout<< "SDL init failed! exit..." <<std::endl;
+        return -1;
+    }
+
+    const int WINDOW_WIDTH  = 960;
+    const int WINDOW_HEIGHT = 540;
     
     //create window
-    SDL_Window *window = SDL_CreateWindow(kTitleName, kWindowPosX, kWindowPosY, width, height, kWindowFlags);
+    SDL_Window *window = SDL_CreateWindow(kTitleName, kWindowPosX, kWindowPosY, WINDOW_WIDTH, WINDOW_HEIGHT, kWindowFlags);
     SDL_Event event;
         
     FilamentRenderer renderer(Engine::Backend::OPENGL, getNativeWindow(window));
-    FilamentEntity entity_texture(renderer.engine_ref()); 
-    FilamentEntity entity_display(renderer.engine_ref());
+    bool render_once = true;
 
-    TextureWrapper tex_wrapper(renderer.engine_ref(), width, height, data);
+    //load texture data
+    int width, height;
+    uint8_t *tex_data = load_image("textures/Blue_tiles_01/Blue_tiles_01_Color.png", width, height);
+    TextureWrapper tex_wrapper(renderer.engine_ref(), width, height, tex_data);
 
     uint8_t byte_stride = sizeof(Vertex);
     uint32_t pos_offset = offsetof(Vertex, position);
     uint32_t uv_offset  = offsetof(Vertex, uv);
     uint32_t color_offset  = offsetof(Vertex, color);
 
-    //simple texture(offscreen)
-    uint32_t nvertices = sizeof(QUAD_VERTICES) / byte_stride;
-    uint32_t nindices  = sizeof(QUAD_INDICES)  / sizeof(uint16_t);
-    entity_texture.InitVertexBuffer(nvertices, byte_stride, pos_offset, uv_offset, color_offset,  QUAD_VERTICES);
-    entity_texture.InitIndexBuffer(nindices, QUAD_INDICES);
-    entity_texture.InitMaterial((void*)BAKED_TEXTURE_MAT, sizeof(BAKED_TEXTURE_MAT));    
-    entity_texture.BindTextureSampler("albedo", tex_wrapper.texture_ref());
-
     FilaRenderTarget rgba_target;
-    rgba_target.ResetRenderBuffer(width, height, renderer.engine_ref(), true);
-    ::Renderable renderable_texture(renderer.engine_ref(), "SimpleTexture", rgba_target);
-    renderable_texture.SetViewport(0, 0, width, height);
-    renderable_texture.AddEntity("Quad", &entity_texture);
-
-    //simple texture(onscreen)
-    entity_display.InitVertexBuffer(nvertices, byte_stride, pos_offset, uv_offset, color_offset,  QUAD_VERTICES);
-    entity_display.InitIndexBuffer(nindices, QUAD_INDICES);
-    entity_display.InitMaterial((void*)BAKED_TEXTURE_MAT, sizeof(BAKED_TEXTURE_MAT));    
-    entity_display.BindTextureSampler("albedo", rgba_target.color());
-
-    ::Renderable renderable_display(renderer.engine_ref(), "Display"); 
-    renderable_display.SetViewport(0, 0, width, height);
-    renderable_display.AddEntity("Quad", &entity_display);
+    size_t nvertices, nindices;
 
     //simple triangle(offscreen)
     nvertices = sizeof(TRIANGLE_VERTICES) / byte_stride;
@@ -485,22 +540,64 @@ int main(){
     FilamentEntity entity_triangle(renderer.engine_ref());
     entity_triangle.InitVertexBuffer(nvertices, byte_stride, pos_offset, uv_offset, color_offset,  TRIANGLE_VERTICES);
     entity_triangle.InitIndexBuffer(nindices, TRIANGLE_INDICES);
-    entity_triangle.InitMaterial((void*)BAKED_COLOR_MAT, sizeof(BAKED_COLOR_MAT));    
+    entity_triangle.InitMaterial((void*)BAKED_COLOR_MAT, sizeof(BAKED_COLOR_MAT));
 
-    ::Renderable renderable_triangle(renderer.engine_ref(), "Triangle", rgba_target, open_post_process);
-    renderable_triangle.SetViewport(0, 0, width, height);
-    renderable_triangle.AddEntity("Triangle", &entity_triangle);
+    rgba_target.ResetRenderBuffer(WINDOW_WIDTH, WINDOW_HEIGHT, renderer.engine_ref(), true);
+    ::Renderable renderable_triangle(renderer.engine_ref(), "Triangle", rgba_target, false);
+    renderable_triangle.SetViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+    renderable_triangle.SetCameraLootAt({2,2,2},{0,0,0},{0,1,0});
+    renderable_triangle.SetCameraProjection(45, double(WINDOW_WIDTH) / WINDOW_HEIGHT, 0.1, 10);
+
+    //simple cube(offscreen)
+    nvertices = sizeof(CUBE_VERTICES) / byte_stride;
+    nindices  = sizeof(CUBE_INDICES) / sizeof(uint16_t);
+    FilamentEntity entity_cube(renderer.engine_ref());
+    entity_cube.InitVertexBuffer(nvertices, byte_stride, pos_offset, uv_offset, color_offset,  CUBE_VERTICES);
+    entity_cube.InitIndexBuffer(nindices, CUBE_INDICES);
+    entity_cube.InitMaterial((void*)BAKED_TEXTURE_MAT, sizeof(BAKED_TEXTURE_MAT));
+    entity_cube.BindTextureSampler("albedo", tex_wrapper.texture_ref());
+    //entity_cube.InitMaterial((void*)BAKED_COLOR_MAT, sizeof(BAKED_COLOR_MAT));
+
+    ::Renderable renderable_cube(renderer.engine_ref(), "Cube", rgba_target);
+    renderable_cube.SetViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+    renderable_cube.AddEntity("Cube", &entity_cube);
+    renderable_cube.SetCameraLootAt({2,2,2},{0,0,0},{0,1,0});
+    renderable_cube.SetCameraProjection(45, double(WINDOW_WIDTH) / WINDOW_HEIGHT, 0.1, 10);
+
+    //simple texture(onscreen)
+    nvertices = sizeof(QUAD_VERTICES) / byte_stride;
+    nindices  = sizeof(QUAD_INDICES)  / sizeof(uint16_t);
+    FilamentEntity entity_display(renderer.engine_ref());
+    entity_display.InitVertexBuffer(nvertices, byte_stride, pos_offset, uv_offset, color_offset,  QUAD_VERTICES);
+    entity_display.InitIndexBuffer(nindices, QUAD_INDICES);
+    entity_display.InitMaterial((void*)BAKED_TEXTURE_MAT, sizeof(BAKED_TEXTURE_MAT));
+    entity_display.BindTextureSampler("albedo", rgba_target.color());
+
+    ::Renderable renderable_display(renderer.engine_ref(), "Display");
+    renderable_display.SetViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+    renderable_display.AddEntity("Quad", &entity_display);
     
-    while(!ShouldWindowExit(&event)){        
-        renderer.DoRender({&renderable_texture, &renderable_triangle, &renderable_display});
+    if(render_once)
+        renderable_cube.AddEntity("Triangle", &entity_triangle);
+    else
+        renderable_triangle.AddEntity("Triangle", &entity_triangle);
+    
+    while(!ShouldWindowExit(&event)){
+        //renderer.DoRender({&renderable_texture, &renderable_triangle, &renderable_display});
+        renderable_cube.animate((double) SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency(), "Cube");
+        if(render_once)
+            renderer.DoRender({&renderable_cube, &renderable_display});
+        else
+            renderer.DoRender({&renderable_cube, &renderable_triangle, &renderable_display});
+        //SDL_Delay(16);
     }
     
-    stbi_image_free(data);
+    stbi_image_free(tex_data);
     rgba_target.Destroy(renderer.engine_ref());
     tex_wrapper.Destroy();
-    renderable_texture.Destroy();    
     renderable_display.Destroy();
     renderable_triangle.Destroy();
+    renderable_cube.Destroy();
     renderer.Destroy();
     SDL_DestroyWindow(window);
     SDL_Quit();
